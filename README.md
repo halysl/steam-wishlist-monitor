@@ -14,14 +14,15 @@
 1. [Cloudflare 账号](https://dash.cloudflare.com)
 2. [Steam Web API Key](https://steamcommunity.com/dev/apikey)
 3. [Telegram Bot Token](https://t.me/BotFather)
-4. 安装 [pywrangler](https://developers.cloudflare.com/workers/languages/python/)
+4. 安装 [wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
 
 ## 部署步骤
 
-### 1. 安装 pywrangler
+### 1. 安装 wrangler
 
 ```bash
-pip install pywrangler
+npm install -g wrangler
+# 或使用 npx 无需全局安装
 ```
 
 ### 2. 创建 KV Namespace
@@ -50,14 +51,14 @@ npx wrangler secret put TELEGRAM_CHAT_ID
 ### 4. 部署
 
 ```bash
-pywrangler deploy
+npx wrangler deploy
 ```
 
 ## 本地测试
 
 ```bash
 # 启动开发服务器
-pywrangler dev
+npx wrangler dev
 
 # 手动触发定时任务
 curl "http://localhost:8787/__scheduled?cron=0+8+*+*+*"
@@ -68,7 +69,7 @@ curl "http://localhost:8787/__scheduled?cron=0+8+*+*+*"
 | 环境变量 | 说明 |
 |---------|------|
 | `STEAM_API_KEY` | Steam Web API 密钥 |
-| `STEAM_USER_ID` | 目标用户的 64 位 Steam ID |
+| `STEAM_USER_ID` | 目标用户的 17 位 Steam ID |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token |
 | `TELEGRAM_CHAT_ID` | 接收通知的 Chat ID |
 | `COUNTRY_CODE` | 价格区域 (默认 `CN`) |
@@ -77,7 +78,7 @@ curl "http://localhost:8787/__scheduled?cron=0+8+*+*+*"
 ## 获取 Steam User ID
 
 1. 打开 Steam 个人资料页面
-2. URL 中的数字即为 64 位 Steam ID
+2. URL 中的数字即为 17 位 Steam ID
 3. 或使用 [SteamID Finder](https://steamid.io/)
 
 ## 注意事项
