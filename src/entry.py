@@ -39,8 +39,11 @@ async def http_get(url: str) -> dict | None:
         return None
 
 
-async def http_post(url: str, data: dict) -> dict | None:
-    """发起 POST 请求并返回 JSON"""
+async def http_post(url: str, data: dict) -> tuple[dict | None, str | None]:
+    """
+    发起 POST 请求并返回 JSON
+    返回: (response_data, error_message)
+    """
     try:
         options = Object.fromEntries(to_js([
             ["method", "POST"],
@@ -50,14 +53,18 @@ async def http_post(url: str, data: dict) -> dict | None:
             ["body", json.dumps(data)]
         ]))
         response = await fetch(url, options)
-        if not response.ok:
-            console.error(f"HTTP POST failed: {url} -> {response.status}")
-            return None
         text = await response.text()
-        return json.loads(text)
+        
+        if not response.ok:
+            error_msg = f"HTTP {response.status}: {text}"
+            console.error(f"HTTP POST failed: {url} -> {error_msg}")
+            return None, error_msg
+        
+        return json.loads(text), None
     except Exception as e:
-        console.error(f"HTTP POST error: {url} -> {e}")
-        return None
+        error_msg = str(e)
+        console.error(f"HTTP POST error: {url} -> {error_msg}")
+        return None, error_msg
 
 
 # ============================================================
@@ -129,7 +136,7 @@ async def get_game_prices(app_ids: list[int], country_code: str) -> list[dict]:
         if price_info:
             results.append(price_info)
         # 避免触发 Steam API 速率限制
-        await asyncio.sleep(3)
+        await asyncio.sleep(1)
     return results
 
 
@@ -198,8 +205,11 @@ def format_discount_message(games: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def send_telegram_notification(bot_token: str, chat_id: str, message: str) -> bool:
-    """发送 Telegram 消息"""
+async def send_telegram_notification(bot_token: str, chat_id: str, message: str) -> tuple[bool, str | None]:
+    """
+    发送 Telegram 消息
+    返回: (success, error_message)
+    """
     url = TELEGRAM_API.format(token=bot_token)
     payload = {
         "chat_id": chat_id,
@@ -208,74 +218,167 @@ async def send_telegram_notification(bot_token: str, chat_id: str, message: str)
         "disable_web_page_preview": True
     }
     
-    result = await http_post(url, payload)
+    result, error = await http_post(url, payload)
+    if error:
+        console.error(f"Failed to send Telegram notification: {error}")
+        return False, error
+    
     if result and result.get("ok"):
         console.log(f"Telegram notification sent successfully")
-        return True
+        return True, None
     else:
-        console.error(f"Failed to send Telegram notification: {result}")
-        return False
+        error_msg = f"Telegram API returned: {result}"
+        console.error(error_msg)
+        return False, error_msg
 
 
 # ============================================================
 # Worker 入口
 # ============================================================
 
+async def check_wishlist_discounts(env, dry_run: bool = False) -> dict:
+    """
+    检查愿望单折扣的核心逻辑
+    
+    Args:
+        env: Cloudflare Workers 环境对象
+        dry_run: 如果为 True，则只检查不发送通知，用于调试
+    
+    Returns:
+        包含执行结果的字典
+    """
+    result = {
+        "success": True,
+        "wishlist_count": 0,
+        "games_with_price": 0,
+        "discounted_count": 0,
+        "new_discounts_count": 0,
+        "notification_sent": False,
+        "discounted_games": [],
+        "errors": []
+    }
+    
+    try:
+        # 读取环境变量
+        steam_api_key = env.STEAM_API_KEY
+        steam_user_id = env.STEAM_USER_ID
+        telegram_bot_token = env.TELEGRAM_BOT_TOKEN
+        telegram_chat_id = env.TELEGRAM_CHAT_ID
+        country_code = getattr(env, "COUNTRY_CODE", "CN")
+        min_discount = int(getattr(env, "MIN_DISCOUNT", "0"))
+        
+        # 获取 KV 绑定
+        kv = env.NOTIFIED_GAMES
+        
+        # 1. 获取愿望单
+        console.log("Fetching wishlist...")
+        app_ids = await get_wishlist(steam_user_id, steam_api_key)
+        result["wishlist_count"] = len(app_ids)
+        console.log(f"Found {len(app_ids)} games in wishlist")
+        
+        if not app_ids:
+            console.log("Wishlist is empty, exiting")
+            return result
+        
+        # 2. 获取价格信息
+        console.log("Fetching price information...")
+        games = await get_game_prices(app_ids, country_code)
+        result["games_with_price"] = len(games)
+        console.log(f"Got price info for {len(games)} games")
+        
+        # 3. 筛选有折扣的游戏
+        discounted = filter_discounted_games(games, min_discount)
+        result["discounted_count"] = len(discounted)
+        result["discounted_games"] = discounted
+        console.log(f"Found {len(discounted)} discounted games")
+        
+        if not discounted:
+            console.log("No discounted games found, exiting")
+            return result
+        
+        # 4. 过滤已通知过的游戏
+        new_discounts = await filter_new_discounts(kv, discounted)
+        result["new_discounts_count"] = len(new_discounts)
+        console.log(f"Found {len(new_discounts)} new discounts to notify")
+        
+        if not new_discounts:
+            console.log("All discounts already notified, exiting")
+            return result
+        
+        # 5. 发送 Telegram 通知 (dry_run 模式下跳过)
+        if dry_run:
+            console.log("Dry run mode, skipping notification")
+            result["notification_sent"] = False
+        else:
+            message = format_discount_message(new_discounts)
+            success, telegram_error = await send_telegram_notification(telegram_bot_token, telegram_chat_id, message)
+            result["notification_sent"] = success
+            if telegram_error:
+                result["errors"].append(f"Telegram: {telegram_error}")
+            
+            # 6. 标记已通知
+            if success:
+                for game in new_discounts:
+                    await mark_as_notified(kv, game["app_id"])
+                    console.log(f"Marked as notified: {game['name']}")
+        
+        console.log("Steam wishlist monitor completed")
+        
+    except Exception as e:
+        result["success"] = False
+        result["errors"].append(str(e))
+        console.error(f"Error in check_wishlist_discounts: {e}")
+    
+    return result
+
+
 async def on_scheduled(controller, env, ctx):
     """
     Cron Trigger 入口函数
     """
-    console.log("Steam wishlist monitor started")
+    console.log("Steam wishlist monitor started (scheduled)")
+    await check_wishlist_discounts(env, dry_run=False)
+
+
+async def on_fetch(request, env, ctx):
+    """
+    HTTP 请求入口函数 - 用于手动触发和调试
     
-    # 读取环境变量
-    steam_api_key = env.STEAM_API_KEY
-    steam_user_id = env.STEAM_USER_ID
-    telegram_bot_token = env.TELEGRAM_BOT_TOKEN
-    telegram_chat_id = env.TELEGRAM_CHAT_ID
-    country_code = getattr(env, "COUNTRY_CODE", "CN")
-    min_discount = int(getattr(env, "MIN_DISCOUNT", "0"))
+    支持的路径:
+    - GET /check       执行完整检查流程（发送通知）
+    - GET /check?dry_run=true  执行检查但不发送通知
+    - GET /health      健康检查
+    """
+    from js import Response, Headers
     
-    # 获取 KV 绑定
-    kv = env.NOTIFIED_GAMES
+    url_str = request.url
+    # 解析 URL 路径
+    path = "/" + url_str.split("//", 1)[1].split("/", 1)[-1].split("?")[0]
     
-    # 1. 获取愿望单
-    console.log("Fetching wishlist...")
-    app_ids = await get_wishlist(steam_user_id, steam_api_key)
-    console.log(f"Found {len(app_ids)} games in wishlist")
+    # 解析查询参数
+    query_string = url_str.split("?", 1)[-1] if "?" in url_str else ""
+    dry_run = "dry_run=true" in query_string.lower()
     
-    if not app_ids:
-        console.log("Wishlist is empty, exiting")
-        return
+    headers = Headers.new(to_js([
+        ["Content-Type", "application/json"]
+    ]))
     
-    # 2. 获取价格信息
-    console.log("Fetching price information...")
-    games = await get_game_prices(app_ids, country_code)
-    console.log(f"Got price info for {len(games)} games")
+    if path == "/health":
+        return Response.new(
+            json.dumps({"status": "ok"}),
+            to_js({"status": 200, "headers": headers})
+        )
     
-    # 3. 筛选有折扣的游戏
-    discounted = filter_discounted_games(games, min_discount)
-    console.log(f"Found {len(discounted)} discounted games")
+    if path == "/check":
+        console.log(f"Steam wishlist monitor started (manual trigger, dry_run={dry_run})")
+        result = await check_wishlist_discounts(env, dry_run=dry_run)
+        return Response.new(
+            json.dumps(result, ensure_ascii=False, indent=2),
+            to_js({"status": 200 if result["success"] else 500, "headers": headers})
+        )
     
-    if not discounted:
-        console.log("No discounted games found, exiting")
-        return
-    
-    # 4. 过滤已通知过的游戏
-    new_discounts = await filter_new_discounts(kv, discounted)
-    console.log(f"Found {len(new_discounts)} new discounts to notify")
-    
-    if not new_discounts:
-        console.log("All discounts already notified, exiting")
-        return
-    
-    # 5. 发送 Telegram 通知
-    message = format_discount_message(new_discounts)
-    success = await send_telegram_notification(telegram_bot_token, telegram_chat_id, message)
-    
-    # 6. 标记已通知
-    if success:
-        for game in new_discounts:
-            await mark_as_notified(kv, game["app_id"])
-            console.log(f"Marked as notified: {game['name']}")
-    
-    console.log("Steam wishlist monitor completed")
+    # 默认返回 404
+    return Response.new(
+        json.dumps({"error": "Not found", "available_paths": ["/health", "/check", "/check?dry_run=true"]}),
+        to_js({"status": 404, "headers": headers})
+    )

@@ -8,7 +8,7 @@ crons = ["0 8 * * *"]  # 每天 UTC 8:00 (北京时间 16:00) 执行
 
 [[kv_namespaces]]
 binding = "NOTIFIED_GAMES"
-id = "a20d1c06e09b41f68f4ce63eda7e7282"  # 部署前需替换为实际 ID
+id = "REAL_ID"  # 部署前需替换为实际 ID
 
 [vars]
 COUNTRY_CODE = "CN"
