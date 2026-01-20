@@ -60,8 +60,16 @@ npx wrangler deploy
 # 启动开发服务器
 npx wrangler dev
 
-# 手动触发定时任务
-curl "http://localhost:8787/__scheduled?cron=0+8+*+*+*"
+# 手动触发任务，方便调试
+```shell
+- GET /check       执行完整检查流程（发送通知）
+curl "http://localhost:8787/check"
+
+- GET /check?dry_run=true  执行检查但不发送通知
+curl "http://localhost:8787/check?dry_run=true"
+
+- GET /health      健康检查
+curl "http://localhost:8787/health"
 ```
 
 ## 配置说明
