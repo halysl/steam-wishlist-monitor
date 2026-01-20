@@ -61,7 +61,6 @@ npx wrangler deploy
 npx wrangler dev
 
 # 手动触发任务，方便调试
-```shell
 - GET /check       执行完整检查流程（发送通知）
 curl "http://localhost:8787/check"
 
