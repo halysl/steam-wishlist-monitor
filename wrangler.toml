@@ -1,0 +1,21 @@
+name = "steam-wishlist-monitor"
+main = "src/entry.py"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["python_workers"]
+
+[triggers]
+crons = ["0 8 * * *"]  # 每天 UTC 8:00 (北京时间 16:00) 执行
+
+[[kv_namespaces]]
+binding = "NOTIFIED_GAMES"
+id = "steam"  # 部署前需替换为实际 ID
+
+[vars]
+COUNTRY_CODE = "CN"
+MIN_DISCOUNT = "0"  # 最低折扣阈值，0 表示任何折扣都通知
+
+# 以下需要通过 wrangler secret put 设置:
+# - STEAM_API_KEY
+# - STEAM_USER_ID
+# - TELEGRAM_BOT_TOKEN
+# - TELEGRAM_CHAT_ID

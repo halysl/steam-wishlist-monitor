@@ -1,0 +1,3 @@
+# Cloudflare Workers Python 不需要额外依赖
+# 所有 HTTP 请求通过 JavaScript FFI (js.fetch) 完成
+# JSON 处理使用 Python 内置 json 模块
