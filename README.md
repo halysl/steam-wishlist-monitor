@@ -14,14 +14,15 @@
 1. [Cloudflare 账号](https://dash.cloudflare.com)
 2. [Steam Web API Key](https://steamcommunity.com/dev/apikey)
 3. [Telegram Bot Token](https://t.me/BotFather)
-4. 安装 [pywrangler](https://developers.cloudflare.com/workers/languages/python/)
+4. 安装 [wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
 
 ## 部署步骤
 
-### 1. 安装 pywrangler
+### 1. 安装 wrangler
 
 ```bash
-pip install pywrangler
+npm install -g wrangler
+# 或使用 npx 无需全局安装
 ```
 
 ### 2. 创建 KV Namespace
@@ -50,14 +51,14 @@ npx wrangler secret put TELEGRAM_CHAT_ID
 ### 4. 部署
 
 ```bash
-pywrangler deploy
+npx wrangler deploy
 ```
 
 ## 本地测试
 
 ```bash
 # 启动开发服务器
-pywrangler dev
+npx wrangler dev
 
 # 手动触发定时任务
 curl "http://localhost:8787/__scheduled?cron=0+8+*+*+*"
